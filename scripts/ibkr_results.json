@@ -1,0 +1,11 @@
+{
+  "account": {
+    "account_summary": null,
+    "positions": []
+  },
+  "market_data": {
+    "AAPL": NaN,
+    "MSFT": NaN,
+    "TSLA": NaN
+  }
+}

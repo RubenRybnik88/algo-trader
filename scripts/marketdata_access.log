@@ -1,0 +1,12 @@
+2025-11-04 20:25:30,750 [INFO] Connecting to 172.31.112.1:7497 with clientId 456...
+2025-11-04 20:25:30,752 [INFO] Connected
+2025-11-04 20:25:34,756 [INFO] Disconnecting
+2025-11-04 20:25:34,756 [ERROR] API connection failed: TimeoutError()
+2025-11-04 20:25:34,756 [INFO] Disconnected.
+2025-11-04 20:25:34,756 [ERROR] Failed to connect to TWS: 
+2025-11-04 20:26:12,026 [INFO] Connecting to 172.31.112.1:7497 with clientId 456...
+2025-11-04 20:26:12,027 [INFO] Connected
+2025-11-04 20:26:16,030 [INFO] Disconnecting
+2025-11-04 20:26:16,030 [ERROR] API connection failed: TimeoutError()
+2025-11-04 20:26:16,030 [INFO] Disconnected.
+2025-11-04 20:26:16,030 [ERROR] Failed to connect to TWS: 

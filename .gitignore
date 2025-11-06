@@ -1,22 +1,5 @@
-# Python
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-env/
-.venv/
-*.sqlite3
-*.egg-info/
-dist/
-
-# Jupyter
-.ipynb_checkpoints
-
-# VS Code
-.vscode/
-
-# Docker
-*.log
+venv/
+logs/
 *.env
-*.dockerignore
-docker-compose.override.yml
