@@ -134,6 +134,73 @@ def test_connection():
             disconnect_ib()
             logger.info("IBKR session closed after test.")
 
+# ---------------------------------------------------------------------
+# Market Data Fetcher
+# ---------------------------------------------------------------------
+def get_ibkr_historical_data(symbol: str,
+                             duration: str = "2 Y",
+                             barsize: str = "1 day",
+                             what_to_show: str = "TRADES",
+                             use_rth: bool = True):
+    """
+    Fetch historical data for a given symbol from IBKR.
+
+    Parameters
+    ----------
+    symbol : str
+        e.g. 'AAPL', 'SPY'
+    duration : str
+        IBKR duration string (e.g., '1 Y', '2 Y', '5 D')
+    barsize : str
+        IBKR bar size string (e.g., '1 day', '1 hour', '5 mins')
+    what_to_show : str
+        e.g. 'TRADES', 'MIDPOINT', 'BID', 'ASK'
+    use_rth : bool
+        Restrict to regular trading hours (default True)
+
+    Returns
+    -------
+    pd.DataFrame with columns: date, open, high, low, close, volume
+    """
+    from ib_insync import Stock, util
+    import pandas as pd
+
+    ib = get_ib_connection()
+    contract = Stock(symbol, "SMART", "USD")
+
+    logger.info(f"📈 Requesting {duration} of {barsize} data for {symbol} (RTH={use_rth})...")
+
+    try:
+        bars = ib.reqHistoricalData(
+            contract,
+            endDateTime="",
+            durationStr=duration,
+            barSizeSetting=barsize,
+            whatToShow=what_to_show,
+            useRTH=1 if use_rth else 0,
+            formatDate=1,
+        )
+
+        if not bars:
+            raise ValueError(f"No data returned from IBKR for {symbol}")
+
+        df = util.df(bars)
+        df = df.rename(columns={
+            "date": "date",
+            "open": "open",
+            "high": "high",
+            "low": "low",
+            "close": "close",
+            "volume": "volume",
+        })
+        df = df[["date", "open", "high", "low", "close", "volume"]]
+
+        logger.info(f"✅ Retrieved {len(df)} bars for {symbol}.")
+        return df
+
+    except Exception as e:
+        logger.error(f"❌ Error fetching data for {symbol}: {e}", exc_info=True)
+        raise
 
 # ---------------------------------------------------------------------
 # Entry point
