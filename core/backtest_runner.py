@@ -1,110 +1,139 @@
 # core/backtest_runner.py
+
+import numpy as np
 import pandas as pd
 from core.logger_service import get_logger
+from strategies.registry import load_strategy
 from core.backtest_data_service import BacktestDataService
-from strategies.ma_cross_strategy import MACrossStrategy
-from core.plot_service import plot_backtest
 
 logger = get_logger("backtest_runner")
 
 
 class BacktestRunner:
-    """
-    Runs the MA-cross backtest using DB-backed data.
-    """
-
     def __init__(
         self,
-        symbol: str,
-        resolution: str,
+        symbol,
+        resolution,
+        strategy_name,
         auto_fetch=False,
         fetch_duration="1 Y",
-        do_plot=False,
+        no_fetch=False,
+        plot_mode=None,
+        **strategy_kwargs,
     ):
         self.symbol = symbol
         self.resolution = resolution
+        self.strategy_name = strategy_name
         self.auto_fetch = auto_fetch
-        self.fetch_duration = fetch_duration
-        self.do_plot = do_plot
+        self.no_fetch = no_fetch
+        self.duration = fetch_duration
+        self.plot_mode = plot_mode
+        self.strategy_kwargs = strategy_kwargs
 
-        self.data_service = BacktestDataService()
-        self.strategy = MACrossStrategy()
-
-    # ------------------------------------------------------------------
-    def compute_performance(self, df: pd.DataFrame):
-        returns = df["close"].pct_change().fillna(0)
-        strat_returns = df["position"].shift(1).fillna(0) * returns
-
-        cum_return = (1 + strat_returns).prod() - 1
-        years = max((df["date"].iloc[-1] - df["date"].iloc[0]).days / 365, 1e-9)
-        cagr = (1 + cum_return) ** (1 / years) - 1
-
-        running_max = (1 + strat_returns).cumprod().cummax()
-        dd = (running_max - (1 + strat_returns).cumprod()) / running_max
-        max_dd = dd.max()
-
-        sharpe = strat_returns.mean() / (strat_returns.std() + 1e-12)
-        sharpe *= (252 ** 0.5)
-
-        return {
-            "total_return": cum_return,
-            "cagr": cagr,
-            "max_dd": max_dd,
-            "sharpe": sharpe,
-        }
-
-    # ------------------------------------------------------------------
-    def run(self):
         logger.info(
-            f"Starting DB-backed backtest: {self.symbol} @ {self.resolution} (auto_fetch={self.auto_fetch}, fetch_duration={self.fetch_duration})"
+            f"Initialised BacktestRunner: symbol={symbol}, res={resolution}, "
+            f"strategy={strategy_name}, auto_fetch={auto_fetch}, fetch_duration={fetch_duration}"
         )
 
+        # DB + indicators
+        self.data_service = BacktestDataService()
+
+        # Instantiate chosen strategy
+        self.strategy = load_strategy(strategy_name, **strategy_kwargs)
+
+    # ----------------------------------------------------------------------
+    def run(self):
+        logger.info(
+            f"Starting DB-backed backtest: {self.symbol} @ {self.resolution} "
+            f"(strategy={self.strategy_name}, auto_fetch={self.auto_fetch}, "
+            f"fetch_duration={self.duration})"
+        )
+
+        # --------------------------------------------------------------
+        # 1. Load raw DB data (OHLCV only, no indicators)
+        # --------------------------------------------------------------
         df = self.data_service.load_prices(
             self.symbol,
             self.resolution,
             auto_fetch=self.auto_fetch,
-            duration=self.fetch_duration,
+            duration=self.duration,
         )
 
-        df = df.copy()
-        df["position"] = 0
+        # --------------------------------------------------------------
+        # 2. Compute indicators IN MEMORY (no DB writes)
+        # --------------------------------------------------------------
+        df = self.data_service.indicator_service.compute_indicators_df(df)
 
-        prev_state = False
+        # Ensure sequential integer index
+        df = df.reset_index(drop=True)
+
+        # --------------------------------------------------------------
+        # 3. Strategy execution bar-by-bar
+        # --------------------------------------------------------------
+        positions = []
+        current_position = 0
+
         for i in range(len(df)):
             row = df.iloc[i]
-            date = row["date"]
+            signal = self.strategy.on_bar(i, row, df)
 
-            short = row["MA20"]
-            long = row["MA50"]
+            if signal == "BUY":
+                current_position = 1
+            elif signal == "SELL":
+                current_position = 0
 
-            if pd.isna(short) or pd.isna(long):
-                continue
+            positions.append(current_position)
 
-            current = short > long
-            if current and not prev_state:
-                df.at[i, "position"] = 1
-            elif not current and prev_state:
-                df.at[i, "position"] = 0
-            else:
-                df.at[i, "position"] = df.at[i - 1, "position"] if i > 0 else 0
-
-            prev_state = current
+        df["position"] = positions
 
         logger.info(
-            f"Generated MA-cross positions: {df['position'].sum()} bar-long equivalents over {len(df)} bars."
+            f"Generated positions: {df['position'].sum()} bar-long equivalents across {len(df)} bars."
         )
 
-        perf = self.compute_performance(df)
+        # --------------------------------------------------------------
+        # 4. Compute returns
+        # --------------------------------------------------------------
+        df["return"] = df["close"].pct_change().fillna(0)
+        df["strategy_return"] = df["return"] * df["position"]
+
+        strat_total = (1 + df["strategy_return"]).prod() - 1
+        buyhold_total = (1 + df["return"]).prod() - 1
+
+        strat_dd = df["strategy_return"].cumsum().min()
+        buyhold_dd = df["return"].cumsum().min()
+
+        strat_sharpe = df["strategy_return"].mean() / (df["strategy_return"].std() + 1e-12)
+        buyhold_sharpe = df["return"].mean() / (df["return"].std() + 1e-12)
 
         logger.info(
-            f"Backtest complete for {self.symbol} @ {self.resolution}: "
-            f"bars={len(df)} total_return={perf['total_return']*100:.2f}% "
-            f"cagr={perf['cagr']*100:.2f}% "
-            f"max_drawdown={perf['max_dd']*100:.2f}% "
-            f"sharpe={perf['sharpe']:.2f}"
+            f"Backtest results for {self.symbol}: "
+            f"Strategy Return={strat_total*100:.2f}% "
+            f"Buy&Hold Return={buyhold_total*100:.2f}% Sharpe={strat_sharpe:.2f}"
         )
 
-        if self.do_plot:
-            plot_backtest(df, self.symbol, self.resolution)
+        # --------------------------------------------------------------
+        # 5. Plotting (simple or full)
+        # --------------------------------------------------------------
+        if self.plot_mode:
+            from core.plot_service import PlotService
+            PlotService().plot(
+                symbol=self.symbol,
+                resolution=self.resolution,
+                df=df,
+                strategy_return=strat_total,
+                buyhold_return=buyhold_total,
+                mode=self.plot_mode,
+            )
 
-        return perf
+        # --------------------------------------------------------------
+        # 6. Return stats
+        # --------------------------------------------------------------
+        return {
+            "bars": len(df),
+            "total_return": strat_total,
+            "buyhold_return": buyhold_total,
+            "sharpe": strat_sharpe,
+            "buyhold_sharpe": buyhold_sharpe,
+            "max_dd": strat_dd,
+            "buyhold_dd": buyhold_dd,
+        }

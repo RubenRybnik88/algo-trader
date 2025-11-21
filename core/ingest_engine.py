@@ -84,6 +84,54 @@ class IngestionEngine:
             self.session.commit()
 
     # ------------------------------------------------------------------
+    # inside IngestionEngine class
+
+    async def ingest_async(self, tasks):
+        """
+        Run multiple fetches concurrently:
+        tasks = [
+        (contract, duration, barSize, symbol, resolution),
+        ...
+        ]
+        """
+
+        from core.async_ibkr_fetcher import AsyncIBKRFetcher
+
+        fetcher = AsyncIBKRFetcher(
+            host=self.host, port=self.port, client_id=self.client_id
+        )
+
+        await fetcher.connect()
+
+        coroutines = [
+            fetcher.fetch(contract, duration, bar_size)
+            for (contract, duration, bar_size, symbol, resolution) in tasks
+        ]
+
+        results = await asyncio.gather(*coroutines)
+
+        # Process results sequentially → write to DB
+        output = {}
+        for idx, bars in enumerate(results):
+            contract, duration, bar_size, symbol, resolution = tasks[idx]
+            output_key = f"{symbol}-{resolution}"
+
+            # Store in DB (serialised)
+            df = self._convert_bars_to_df(bars, symbol, resolution)
+            inserted = self._save_df(df)
+
+            # Compute indicators
+            self.indicators.compute_for(symbol, resolution)
+
+            output[output_key] = {
+                "fetched": len(bars),
+                "inserted": inserted,
+                "indicator_rows": len(df),
+            }
+
+        await fetcher.disconnect()
+        return output
+
     def ingest_dataframe(self, symbol: str, resolution: str, df: pd.DataFrame) -> int:
         """
         Insert OHLCV rows.

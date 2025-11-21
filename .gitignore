@@ -1,5 +1,62 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
 venv/
+.venv/
+
+# IDEs / Editors
+.idea/
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs and temp
 logs/
+tmp/
+*.log
+*.tmp
+
+# Data
+data/raw/
+data/plots/
+data/exports/
+data/cache/
+ingest/cache/
+
+# IBKR internal directories
+ibgateway/
+jts/
+*.xml
+
+# Local configs and secrets
+config/*.toml
+config/*.ini
 *.env
+.env.*
+secret_*.json
+
+# Database
+*.sqlite
+*.db
+
+# Docker junk
+docker/*.pid
+docker/*.tmp
+docker/logs/
+
+# Compiled C extensions
+*.so
+
+# Test outputs
+tests/output/
+coverage/
+
+# Misc
+*.bak
+*.old

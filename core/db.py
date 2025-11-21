@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 DB_USER = os.getenv("PGUSER", "quant")
 DB_PASS = os.getenv("PGPASSWORD", "quantpass")
 DB_HOST = os.getenv("PGHOST", "localhost")
-DB_PORT = os.getenv("PGPORT", "5432")
+DB_PORT = os.getenv("PGPORT", "5433")
 DB_NAME = os.getenv("PGDATABASE", "marketdata")
 
 DATABASE_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"

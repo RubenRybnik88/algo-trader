@@ -1,77 +1,50 @@
-"""
-DB-native moving-average crossover strategy.
-
-Uses indicators stored in the DB (ma20, ma50) where possible, and falls
-back to on-the-fly calculation if the columns are missing.
-
-Returns a position series:
-- 1.0 → long
-- 0.0 → flat
-"""
+# strategies/db_ma_cross_strategy.py
 
 import pandas as pd
+from strategies.base import Strategy
 from core.logger_service import get_logger
 
 logger = get_logger("db_ma_cross_strategy")
 
 
-class DBMACrossStrategy:tree -L 2
+class DbMaCrossStrategy(Strategy):
     """
-    Simple MA20 / MA50 crossover regime strategy:
+    DB-backed MA crossover strategy.
 
-    position = 1 if ma20 > ma50
-             = 0 otherwise
+    Uses indicator columns:
+      - ma20
+      - ma50
 
-    This defines the *state* (regime). The backtest engine will derive
-    buy/sell events from position changes (0→1 / 1→0) for plotting.
+    Logic:
+      - BUY  when ma20 crosses above ma50
+      - SELL when ma20 crosses below ma50
     """
 
-    def __init__(self, short_window: int = 20, long_window: int = 50):
-        self.short_window = short_window
-        self.long_window = long_window
+    def __init__(self, short_col: str = "ma20", long_col: str = "ma50"):
+        self.short_col = short_col
+        self.long_col = long_col
+        self.prev_state = None
 
-    def _ensure_ma_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        df = df.copy()
+    def on_bar(self, i, row, df):
+        if self.short_col not in df.columns or self.long_col not in df.columns:
+            return None
 
-        if "ma20" not in df.columns or df["ma20"].isna().all():
-            logger.info("ma20 missing or empty; computing rolling mean(20) on close.")
-            df["ma20"] = df["close"].rolling(self.short_window).mean()
+        short = row[self.short_col]
+        long = row[self.long_col]
 
-        if "ma50" not in df.columns or df["ma50"].isna().all():
-            logger.info("ma50 missing or empty; computing rolling mean(50) on close.")
-            df["ma50"] = df["close"].rolling(self.long_window).mean()
+        if pd.isna(short) or pd.isna(long):
+            return None
 
-        return df
+        curr_state = short > long
+        signal = None
 
-    def generate_positions(self, df: pd.DataFrame) -> pd.Series:
-        """
-        Core strategy function.
+        if self.prev_state is not None:
+            if curr_state and not self.prev_state:
+                signal = "BUY"
+                logger.info(f"{row['date'].date()} DB-MA golden cross BUY")
+            elif not curr_state and self.prev_state:
+                signal = "SELL"
+                logger.info(f"{row['date'].date()} DB-MA death cross SELL")
 
-        Parameters
-        ----------
-        df : DataFrame
-            Must contain at least 'close', and ideally 'ma20', 'ma50'.
-
-        Returns
-        -------
-        pandas.Series
-            Indexed like df, with values in {0.0, 1.0}.
-        """
-        if df.empty:
-            logger.warning("DBMACrossStrategy.generate_positions() received empty df.")
-            return pd.Series(dtype=float)
-
-        df = df.sort_index()
-        df = self._ensure_ma_columns(df)
-
-        short = df["ma20"]
-        long = df["ma50"]
-
-        position = (short > long).astype(float)
-        position = position.fillna(0.0)
-
-        logger.info(
-            "Generated MA-cross positions: "
-            f"{int(position.sum())} bar-long equivalents over {len(position)} bars."
-        )
-        return position
+        self.prev_state = curr_state
+        return signal
